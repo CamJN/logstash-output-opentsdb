@@ -1,13 +1,13 @@
 Gem::Specification.new do |s|
 
   s.name            = 'logstash-output-opentsdb'
-  s.version         = '2.0.2'
+  s.version         = '2.4.0'
   s.licenses        = ['Apache License (2.0)']
   s.summary         = "This output allows you to pull metrics from your logs and ship them to opentsdb"
   s.description     = "This gem is a logstash plugin required to be installed on top of the Logstash core pipeline using $LS_HOME/bin/plugin install gemname. This gem is not a stand-alone program"
   s.authors         = ["Elastic"]
   s.email           = 'info@elastic.co'
-  s.homepage        = "http://www.elastic.co/guide/en/logstash/current/index.html"
+  s.homepage        = "http://logstash.net/"
   s.require_paths = ["lib"]
 
   # Files
@@ -20,8 +20,22 @@ Gem::Specification.new do |s|
   s.metadata = { "logstash_plugin" => "true", "logstash_group" => "output" }
 
   # Gem dependencies
-  s.add_runtime_dependency "logstash-core", ">= 2.0.0.beta2", "< 3.0.0"
+  s.add_runtime_dependency 'concurrent-ruby'
+  #s.add_runtime_dependency 'opentsdb', ['>= 1.0.13', '~> 1.0']
+  s.add_runtime_dependency 'stud', ['>= 0.0.17', '~> 0.0']
+  s.add_runtime_dependency 'cabin', ['~> 0.6']
+  s.add_runtime_dependency "logstash-core", ">= 2.0.0", "< 3.0.0"
+
+  s.add_development_dependency 'ftw', '~> 0.0.42'
+  s.add_development_dependency 'logstash-codec-plain'
+
+  if RUBY_PLATFORM == 'java'
+    s.platform = RUBY_PLATFORM
+    s.add_runtime_dependency "manticore", '>= 0.5.2', '< 1.0.0'
+  end
 
   s.add_development_dependency 'logstash-devutils'
+  s.add_development_dependency 'longshoreman'
+  s.add_development_dependency 'flores'
 end
 
