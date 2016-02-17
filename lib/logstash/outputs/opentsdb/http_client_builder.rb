@@ -3,7 +3,7 @@ module LogStash
     class Opentsdb
       module HttpClientBuilder
         def self.build(logger, hosts, params)
-          client_settings = {}
+          client_settings = {stale_check: true}
 
           common_options = {
             :client_settings => client_settings,
