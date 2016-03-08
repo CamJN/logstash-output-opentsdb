@@ -2,8 +2,7 @@ require "logstash/outputs/opentsdb"
 require "cabin"
 require "base64"
 require "json"
-require "opentsdb"
-require "opentsdb/transport/transport/http/manticore"
+require "manticore"
 
 module LogStash
   module Outputs
@@ -109,13 +108,13 @@ module LogStash
 
           @client_options = {
             :hosts => uris,
-            :ssl => client_settings[:ssl],
+            :ssl => client_settings[:ssl] || {},
             :transport_options => {
               :socket_timeout => timeout,
               :request_timeout => timeout,
               :proxy => client_settings[:proxy]
             },
-            :transport_class => ::Opentsdb::Transport::Transport::HTTP::Manticore
+            :transport_class => Manticore
           }
 
           if options[:user] && options[:password] then

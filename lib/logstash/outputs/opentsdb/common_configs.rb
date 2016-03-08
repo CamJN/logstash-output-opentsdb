@@ -20,7 +20,7 @@ module LogStash
           mod.config :hosts, :validate => :array, :default => ["127.0.0.1:4242"]
 
           # Whether to use millisecond precision in timestamps written to opentsdb.
-          mod.config :use_millis, :validate => bool, :default => false
+          mod.config :use_millis, :validate => :boolean, :default => false
 
           # This plugin uses the put API for improved indexing performance.
           # To make efficient API calls, we will buffer a certain number of
