@@ -1,118 +1,265 @@
 # encoding: utf-8
-require "logstash/outputs/base"
 require "logstash/namespace"
-require "socket"
-require "logstash/environment"
+require "logstash/outputs/base"
 require "logstash/json"
-require "concurrent"
 require "stud/buffer"
-require "thread" # for safe queueing
-require "uri" # for escaping user input
 
-# This output allows you to pull metrics from your logs and ship them to
-# opentsdb. Opentsdb is an open source tool for storing and graphing metrics.
+# This output lets you output Metrics to Opentsdb
 #
-# This output only speaks the HTTP protocol. HTTP is the preferred protocol for interacting with Opentsdb as of version 2.0
-# We strongly encourage the use of HTTP over the telnet protocol for a number of reasons. HTTP is only marginally slower,
-# yet far easier to administer and work with. When using the HTTP protocol we can know if a write failed without having
-# to query the data back. For those still wishing to use the telnet protocol please see
-# the https://github.com/logstash-plugins/logstash-output-opentsdb plugin.
+# The configuration here attempts to be as friendly as possible
+# and minimize the need for multiple definitions to write to
+# multiple metrics and still be efficient
 #
-# You can learn more about Opentsdb at <http://opentsdb.net/>
-#
-# ==== Retry Policy
-#
-# This plugin uses the Opentsdb http multiple put API to optimize its imports into Opentsdb. These requests may experience
-# either partial or total failures.
-#
-# The following errors are retried infinitely:
-#
-# - Network errors (inability to connect)
-# - 429 (Too many requests) and
-# - 503 (Service unavailable) errors
-#
-# ==== DNS Caching
-#
-# This plugin uses the JVM to lookup DNS entries and is subject to the value of https://docs.oracle.com/javase/7/docs/technotes/guides/net/properties.html[networkaddress.cache.ttl],
-# a global setting for the JVM.
-#
-# As an example, to set your DNS TTL to 1 second you would set
-# the `LS_JAVA_OPTS` environment variable to `-Dnetwordaddress.cache.ttl=1`.
-#
-# Keep in mind that a connection with keepalive enabled will
-# not reevaluate its DNS value while the keepalive is in effect.
+# You can learn more at http://opentsdb.net[Opentsdb homepage]
 class LogStash::Outputs::Opentsdb < LogStash::Outputs::Base
-  require "logstash/outputs/opentsdb/http_client"
-  require "logstash/outputs/opentsdb/http_client_builder"
-  require "logstash/outputs/opentsdb/common_configs"
-  require "logstash/outputs/opentsdb/common"
-
-  # Protocol agnostic (i.e. non-http, non-java specific) configs go here
-  include(LogStash::Outputs::Opentsdb::CommonConfigs)
-
-  # Protocol agnostic methods
-  include(LogStash::Outputs::Opentsdb::Common)
+  include Stud::Buffer
 
   config_name "opentsdb"
 
-  # Username to authenticate to a secure Opentsdb cluster
-  config :user, :validate => :string
-  # Password to authenticate to a secure Opentsdb cluster
-  config :password, :validate => :password
+  # The hostname or IP address to reach your Opentsdb instance
+  config :host, :validate => :string, :required => true
 
-  # HTTP Path at which the Opentsdb server lives. Use this if you must run Opentsdb behind a proxy that remaps
-  # the root path for the Opentsdb HTTP API lives.
-  config :path, :validate => :string, :default => "/"
+  # The port for Opentsdb
+  config :port, :validate => :number, :default => 4242
 
-  # Enable SSL/TLS secured communication to Opentsdb cluster
+  # Http basic auth user
+  config :user, :validate => :string, :default => nil
+
+  # Http basic auth password
+  config :password, :validate => :password, :default => nil
+
+  # Enable SSL/TLS secured communication to Opentsdb
   config :ssl, :validate => :boolean, :default => false
 
-  # Option to validate the server's certificate. Disabling this severely compromises security.
-  # For more information on disabling certificate verification please read
-  # https://www.cs.utexas.edu/~shmat/shmat_ccs12.pdf
-  config :ssl_certificate_verification, :validate => :boolean, :default => true
+  # Metric name - supports sprintf formatting
+  config :metric, :validate => :string, :required => true
 
-  # The .cer or .pem file to validate the server's certificate
-  config :cacert, :validate => :path
+  # The name of the field containing the value to use. This can be dynamic using the `%{foo}` syntax.
+  #     `"the_value"`
+  #     `"%{get_value_from}"`
+  config :value, :validate => :string, :required => true
 
-  # The JKS truststore to validate the server's certificate.
-  # Use either `:truststore` or `:cacert`
-  config :truststore, :validate => :path
+  # Allow the override of the timestamp column in the event?
+  #
+  # By default the time will be determined by the value of `@timestamp`.
+  #
+  # Setting this to `true` allows you to explicitly set the timestamp column yourself
+  #
+  # Note: **`time` must be an epoch value in either seconds, milliseconds or microseconds**
+  config :allow_time_override, :validate => :boolean, :default => false
 
-  # Set the truststore password
-  config :truststore_password, :validate => :password
+  # Which field to use as the time for the event
+  config :time_override_field, :validate => :string, :default => "time"
 
-  # The keystore used to present a certificate to the server.
-  # It can be either .jks or .p12
-  config :keystore, :validate => :path
+  # Set the level of precision of `timestamp`
+  config :use_millis, :validate => :boolean, :default => false
 
-  # Set the truststore password
-  config :keystore_password, :validate => :password
+  # Allow value coercion
+  #
+  # this will attempt to convert data point value to the appropriate type before posting
+  # otherwise sprintf-filtered numeric values could get sent as strings
+  #
+  # currently supported datatypes are `integer` and `float`
+  #
+  config :coerce_value, :validate => :string, :default => "float"
 
-  # Set the address of a forward HTTP proxy.
-  # Can be either a string, such as `http://localhost:123` or a hash in the form
-  # of `{host: 'proxy.org' port: 80 scheme: 'http'}`.
-  # Note, this is NOT a SOCKS proxy, but a plain HTTP proxy
-  config :proxy
+  # A hash containing the names and values of fields to send to Opentsdb as tags.
+  config :tags, :validate => :hash
 
-  # Set the timeout for network operations and requests sent Opentsdb. If
-  # a timeout occurs, the request will be retried.
-  config :timeout, :validate => :number
+  # This setting controls how many events will be buffered before sending a batch
+  # of events. Note that these are only batched for the same measurement
+  config :flush_size, :validate => :number, :default => 100
 
-  def build_client
-    @client = ::LogStash::Outputs::Opentsdb::HttpClientBuilder.build(@logger, @hosts, params)
-  end
+  # The amount of time since last flush before a flush is forced.
+  #
+  # This setting helps ensure slow event rates don't get stuck in Logstash.
+  # For example, if your `flush_size` is 100, and you have received 10 events,
+  # and it has been more than `idle_flush_time` seconds since the last flush,
+  # logstash will flush those 10 events automatically.
+  #
+  # This helps keep both fast and slow log streams moving along in
+  # near-real-time.
+  config :idle_flush_time, :validate => :number, :default => 1
+
+  # How long to wait after a failure to retry, 0 is no-wait but discouraged
+  config :backoff, :validate => :number, :default => 5
+
+  # Number of retries to perform
+  config :retries, :validate => :number, :default => 0
+
+  public
+  def register
+    require 'manticore'
+    require 'cgi'
+
+    @client = Manticore::Client.new(retry_non_idempotent: true, stale_check: true)
+
+    buffer_initialize(
+      :max_items => @flush_size,
+      :max_interval => @idle_flush_time,
+      :logger => @logger
+    )
+  end # def register
+
+  public
+  def receive(event)
+
+    @logger.debug? and @logger.debug("Opentsdb output: Received event: #{event}")
+
+    # An Opentsdb event looks like this:
+    # {
+    #     "metric": "sys.cpu.nice",
+    #     "timestamp": 1346846400,
+    #     "value": 18,
+    #     "tags": {
+    #        "host": "web01",
+    #        "dc": "lga"
+    #     }
+    # }
+    #
+    # Since we'll be buffering them to send as a batch, we'll only collect
+    # the values going into the points array
+
+    if (@allow_time_override && event.has_key?(@time_override_field))
+      time = event[@time_override_field]
+    else
+      time  = timestamp_at_precision(event, @use_millis)
+      logger.error("Cannot override value of time without 'allow_time_override'. Using event timestamp") if @allow_time_override
+    end
+
+    tags = extract_tags(event)
+
+    event_hash = {
+      "metric"    => event.sprintf(@measurement),
+      "timestamp" => time.to_i,
+      "value"     => coerce_value(event[event.sprintf(@value)])
+    }
+    event_hash["tags"] = tags unless tags.empty?
+
+    buffer_receive(event_hash)
+  end # def receive
+
+  # A batch POST for Opentsdb looks like this:
+  # [
+  # {
+  #   "metric": "sys.cpu.nice",
+  #   "timestamp": 1346846400,
+  #   "value": 18,
+  #   "tags": {
+  #            "host": "web01",
+  #            "dc": "lga"
+  #           }
+  # },
+  # {
+  #   "metric": "sys.cpu.nice",
+  #   "timestamp": 1346846400,
+  #   "value": 9,
+  #   "tags": {
+  #            "host": "web02",
+  #            "dc": "lga"
+  #           }
+  # }
+  # ]
+  def flush(events, teardown = false)
+    @logger.debug? and @logger.debug("Flushing #{events.size} events - Teardown? #{teardown}")
+    try = 0
+    until post(LogStash::Json.dump(events))
+      break if (@retries <= 0 or try >= @retries)
+      sleep(@backoff) if @backoff > 0
+      try += 1
+    end
+  end # def flush
+
+  def post(body)
+    begin
+      query_params = "details"
+      protocol = @ssl ? "https" : "http"
+      base_url = "#{protocol}://#{@host}:#{@port}/api/put"
+      url = "#{base_url}?#{query_params}"
+
+      @logger.debug? and @logger.debug("POSTing to #{url}")
+      @logger.debug? and @logger.debug("Post body: #{body}")
+      req = {:body => body}
+      req[:auth] = {:user => @user, :password => @password} unless (@user.nil? or @password.nil?)
+      response = @client.post!(url, req)
+
+    rescue EOFError
+      @logger.warn("EOF while writing request or reading response header from Opentsdb",
+                   :host => @host, :port => @port)
+      return false # abort this flush
+    rescue Manticore::ManticoreException
+      return false
+    end
+
+    if read_body?(response)
+      # Consume the body for error checking
+      # This will also free up the connection for reuse.
+      body = ""
+      begin
+        response.read_body { |chunk| body += chunk }
+      rescue EOFError
+        @logger.warn("EOF while reading response body from Opentsdb",
+                     :host => @host, :port => @port)
+        return false # abort this flush
+      end
+
+      @logger.debug? and @logger.debug("Body: #{body}")
+    end
+
+    unless response && (200..299).include?(response.code)
+      @logger.error("Error writing to Opentsdb",
+                    :response => response, :response_body => body,
+                    :request_body => body)
+      return false
+    else
+      @logger.debug? and @logger.debug("Post response: #{response}")
+      return true
+    end
+  end # def post
 
   def close
-    @stopping.make_true
-    @buffer.stop
+    buffer_flush(:final => true)
+  end # def teardown
+
+  # Coerce value in the event data to the appropriate type. This requires
+  # foreknowledge of what's in the data point, which is less than ideal.
+  def coerce_value(value)
+    case @coerce_value.to_sym
+    when :integer
+      value.to_i
+
+    when :float
+      value.to_f
+
+    when :string
+      value.to_s
+
+    else
+      @logger.warn("Don't know how to convert to #{value_type}. Returning value unchanged")
+      value
+    end
   end
 
-  @@plugins = Gem::Specification.find_all{|spec| spec.name =~ /logstash-output-opentsdb-/ }
+  def extract_tags(event)
+    tags = {}
+    @tags.map{|k,v|
+      tags[event.sprintf(k)] = event.sprintf(v)
+    }
+    tags
+  end
 
-  @@plugins.each do |plugin|
-    name = plugin.name.split('-')[-1]
-    require "logstash/outputs/opentsdb/#{name}"
+  # Returns the numeric value of the given timestamp in the requested precision.
+  # precision must be one of the valid values for time_precision
+  def timestamp_at_precision( event, use_millis )
+    time_format = '%{+%s}'
+    time_format += '%{+SSS}' if use_millis
+    event.sprintf(time_format)
+  end
+
+  # Only read the response body if its status is not 1xx, 204, or 304. TODO: Should
+  # also not try reading the body if the request was a HEAD
+  def read_body?( response )
+    ! (!response.nil? || [204,304].include?(response.code) || (100..199).include?(response.code))
   end
 
 end # class LogStash::Outputs::Opentsdb

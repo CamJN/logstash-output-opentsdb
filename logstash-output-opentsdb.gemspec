@@ -20,15 +20,12 @@ Gem::Specification.new do |s|
   s.metadata = { "logstash_plugin" => "true", "logstash_group" => "output" }
 
   # Gem dependencies
-  s.add_runtime_dependency 'concurrent-ruby'
-  s.add_runtime_dependency 'stud', ['>= 0.0.17', '~> 0.0']
-  s.add_runtime_dependency 'cabin', ['~> 0.6']
-  s.add_runtime_dependency "logstash-core", ">= 2.0.0", "< 3.0.0"
-  s.add_runtime_dependency "manticore", '>= 0.5.2', '< 1.0.0'
+  s.add_runtime_dependency "logstash-core", ">= 2.0.0.beta2", "< 3.0.0"
 
-  s.add_development_dependency 'ftw', '~> 0.0.42'
-  s.add_development_dependency 'logstash-codec-plain'
+  s.add_runtime_dependency 'stud'
+  s.add_runtime_dependency 'manticore'
+
   s.add_development_dependency 'logstash-devutils'
-  s.add_development_dependency 'longshoreman'
-  s.add_development_dependency 'flores'
+  s.add_development_dependency 'logstash-input-generator'
+  s.add_development_dependency 'logstash-filter-kv'
 end
