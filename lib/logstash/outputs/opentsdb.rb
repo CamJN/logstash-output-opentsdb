@@ -130,7 +130,7 @@ class LogStash::Outputs::Opentsdb < LogStash::Outputs::Base
     tags = extract_tags(event)
 
     event_hash = {
-      "metric"    => event.sprintf(@measurement),
+      "metric"    => event.sprintf(@metric),
       "timestamp" => time.to_i,
       "value"     => coerce_value(event[event.sprintf(@value)])
     }
