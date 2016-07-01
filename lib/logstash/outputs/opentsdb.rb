@@ -16,8 +16,8 @@ class LogStash::Outputs::Opentsdb < LogStash::Outputs::Base
 
   config_name "opentsdb"
 
-  # The hostname or IP address to reach your Opentsdb instance
-  config :host, :validate => :string, :required => true
+  # The address of the opentsdb server.
+  config :host, :validate => :string, :default => "localhost", :required => true
 
   # The port for Opentsdb
   config :port, :validate => :number, :default => 4242
