@@ -1,5 +1,8 @@
-## 3.1.1
+## 3.2.0
  - Switch to use http api & retry
+
+## 3.1.1
+  - Relax constraint on logstash-core-plugin-api to >= 1.60 <= 2.99
 
 ## 3.1.0
  - breaking,config: Removing deprecated config `debug`.
